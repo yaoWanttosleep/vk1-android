@@ -754,6 +754,65 @@
     var rimY = state.top + state.size * 0.3639
     return { x: Math.round(ironAnchorX()), y: Math.round(rimY - worn.h / 2 - (p ? ironStackIndex(p) : 0) * worn.h * 2 / 3), w: worn.w, h: worn.h }
   }
+  function wornPot() {
+    var top = null
+    for (var i = 0; i < state.bowls.length; i++) {
+      var b = state.bowls[i]
+      if (!b.iron || !b.onHead || b.fadeT > 0) continue
+      if (!top || b.Y < top.Y) top = b
+    }
+    return top
+  }
+  function potBlocksFeed(b) {
+    // Once a bowl has touched the pot it must reach the floor before anything can feed it,
+    // otherwise it just slides off the rim straight into her mouth.
+    if (b.potBounced) return true
+    var pot = wornPot()
+    return !!pot && b.Y <= pot.Y + pot.artH * 0.5
+  }
+  var potBounceCount = 0
+  function bounceOffWornPot(r, dt) {
+    if (r.iron || r.dragging || r.onHead) return false
+    var pot = wornPot()
+    if (!pot) return false
+    if (Math.abs(r.X - pot.X) > pot.artW * 0.5) return false
+    var surface = pot.Y - pot.artH * 0.5
+    var bottom = r.Y + r.R
+    var band = Math.max(14, r.R * 0.7)
+    // Swept test: a fast drop can cross the whole band inside one frame, and a plain
+    // "is the bowl inside the band" check would let it tunnel straight through the lid.
+    var prevBottom = bottom - Math.max(0, r.VY) * (dt || 0)
+    if (bottom < surface - 1) return false
+    if (prevBottom > surface + band) return false
+    if (r.VY > 160) {
+      var impact = r.VY
+      r.Y = surface - r.R
+      // Iron is springy enough to throw it clear, and the harder it lands the further it
+      // goes — a fixed throttle made every drop bounce the same two weak hops.
+      r.VY = -impact * 0.45
+      var dir = r.X < pot.X ? -1 : 1
+      if (Math.abs(r.X - pot.X) < 2) dir = Math.random() < 0.5 ? -1 : 1
+      // Capped: a short drop used to fling the bowl most of the way across the screen.
+      r.VX = dir * Math.min(260, Math.max(70, Math.abs(r.VX) * 0.35 + impact * 0.22))
+      r.potBounced = 1
+      r.bounces = 0
+      r.grounded = false
+      r.squish = 1; r.squishT = 0; r.squishDur = SQUISH_DUR
+      potBounceCount++
+      playPool(landPool)
+      if (ANDROID && potBounceCount < 6) ANDROID.log('rice bounce ' + potBounceCount +
+        ' y=' + Math.round(r.Y) + ' vy=' + Math.round(r.VY))
+      return true
+    }
+    // Set down gently: iron does not spring. Ride the lid and slip off the rim instead of
+    // hammering the same spot, which is what made close drops look like a stuck animation.
+    r.Y = surface - r.R
+    if (r.VY > 0) r.VY = 0
+    r.VX = (r.X < pot.X ? -1 : 1) * Math.max(70, Math.abs(r.VX) * 0.8)
+    r.potBounced = 1
+    r.grounded = false
+    return true
+  }
   function ironOnHead(p) {
     if (!p.iron || p.onHead || p.headFalling || p.fed || p.dragging) return false
     if (p.VY < 30) return false
@@ -865,6 +924,7 @@
         var top = vs.top + r.R
         if (r.Y >= floor) {
           r.Y = floor
+          r.potBounced = 0
           var impact = vBefore > 0 ? vBefore : 0
           var slide = Math.abs(r.VX) > SLIDE_STOP
           if (slide) r.VX *= 0.92
@@ -885,10 +945,10 @@
         if (r.X < left) { r.X = left; r.VX = Math.abs(r.VX) * 0.5 }
         if (r.X > right) { r.X = right; r.VX = -Math.abs(r.VX) * 0.5 }
         if (r.Y < top) { r.Y = top; if (r.VY < 0) r.VY = 0 }
-        if (ironOnHead(r)) attachIronPot(r)
+        if (!bounceOffWornPot(r, dt) && ironOnHead(r)) attachIronPot(r)
       }
 
-      if (!r.iron && !r.fed && riceOnGirl(r)) onRiceFed(r)
+      if (!r.iron && !r.fed && riceOnGirl(r) && !potBlocksFeed(r)) onRiceFed(r)
       if (r.squishT < r.squishDur) {
         var u = r.squishT / r.squishDur
         r.squish = Math.cos(u * 2.2 * Math.PI) * (1 - u) * 0.52
@@ -1709,7 +1769,7 @@
           b.maxBounces = bouncesForDrop(Math.max(0, floor - b.Y))
           b.bounces = 0
           b.grounded = false
-      } else if (riceOnGirl(b)) {
+      } else if (riceOnGirl(b) && !potBlocksFeed(b)) {
         onRiceFed(b)
       } else {
         b.VX = b.sampleVX * 0.35
@@ -1868,7 +1928,7 @@
     b.VX = 0
     b.VY = 0
     b.grounded = false
-    if (!b.iron && riceOnGirl(b)) onRiceFed(b)
+    if (!b.iron && riceOnGirl(b) && !potBlocksFeed(b)) onRiceFed(b)
     removeDragListeners()
   }
   window.__vk1LongPress = function (x, y) {

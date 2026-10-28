@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-ROOT = "/root/vk1"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "vendor/widget.js")
 OUT = os.path.join(ROOT, "app/src/assets/vk1/widget.js")
 
@@ -422,6 +422,95 @@ PATCHES = [
       menuRow('填写 API Key', function () { ANDROID.openSetup() })
     }
     menuRow('设置', function () { showSettings('display') })"""),
+
+    # A bowl that drops onto a head already wearing a pot hits the pot's bottom (which is
+    # its top surface now, because the pot sits upside down). A real drop answers with a
+    # short bounce; a gentle placement just slides off the rim. Nothing is fed through a
+    # pot, so a bowl sitting on the lid cannot be swallowed by the character underneath.
+    ("android-rice-pot-bounce-helpers",
+     """  function ironOnHead(p) {""",
+     """  function wornPot() {
+    var top = null
+    for (var i = 0; i < state.bowls.length; i++) {
+      var b = state.bowls[i]
+      if (!b.iron || !b.onHead || b.fadeT > 0) continue
+      if (!top || b.Y < top.Y) top = b
+    }
+    return top
+  }
+  function potBlocksFeed(b) {
+    // Once a bowl has touched the pot it must reach the floor before anything can feed it,
+    // otherwise it just slides off the rim straight into her mouth.
+    if (b.potBounced) return true
+    var pot = wornPot()
+    return !!pot && b.Y <= pot.Y + pot.artH * 0.5
+  }
+  var potBounceCount = 0
+  function bounceOffWornPot(r, dt) {
+    if (r.iron || r.dragging || r.onHead) return false
+    var pot = wornPot()
+    if (!pot) return false
+    if (Math.abs(r.X - pot.X) > pot.artW * 0.5) return false
+    var surface = pot.Y - pot.artH * 0.5
+    var bottom = r.Y + r.R
+    var band = Math.max(14, r.R * 0.7)
+    // Swept test: a fast drop can cross the whole band inside one frame, and a plain
+    // "is the bowl inside the band" check would let it tunnel straight through the lid.
+    var prevBottom = bottom - Math.max(0, r.VY) * (dt || 0)
+    if (bottom < surface - 1) return false
+    if (prevBottom > surface + band) return false
+    if (r.VY > 160) {
+      var impact = r.VY
+      r.Y = surface - r.R
+      // Iron is springy enough to throw it clear, and the harder it lands the further it
+      // goes — a fixed throttle made every drop bounce the same two weak hops.
+      r.VY = -impact * 0.45
+      var dir = r.X < pot.X ? -1 : 1
+      if (Math.abs(r.X - pot.X) < 2) dir = Math.random() < 0.5 ? -1 : 1
+      // Capped: a short drop used to fling the bowl most of the way across the screen.
+      r.VX = dir * Math.min(260, Math.max(70, Math.abs(r.VX) * 0.35 + impact * 0.22))
+      r.potBounced = 1
+      r.bounces = 0
+      r.grounded = false
+      r.squish = 1; r.squishT = 0; r.squishDur = SQUISH_DUR
+      potBounceCount++
+      playPool(landPool)
+      if (ANDROID && potBounceCount < 6) ANDROID.log('rice bounce ' + potBounceCount +
+        ' y=' + Math.round(r.Y) + ' vy=' + Math.round(r.VY))
+      return true
+    }
+    // Set down gently: iron does not spring. Ride the lid and slip off the rim instead of
+    // hammering the same spot, which is what made close drops look like a stuck animation.
+    r.Y = surface - r.R
+    if (r.VY > 0) r.VY = 0
+    r.VX = (r.X < pot.X ? -1 : 1) * Math.max(70, Math.abs(r.VX) * 0.8)
+    r.potBounced = 1
+    r.grounded = false
+    return true
+  }
+  function ironOnHead(p) {"""),
+    ("android-rice-pot-bounce-call",
+     """        if (r.Y < top) { r.Y = top; if (r.VY < 0) r.VY = 0 }
+        if (ironOnHead(r)) attachIronPot(r)""",
+     """        if (r.Y < top) { r.Y = top; if (r.VY < 0) r.VY = 0 }
+        if (!bounceOffWornPot(r, dt) && ironOnHead(r)) attachIronPot(r)"""),
+    ("android-rice-pot-floor-clear",
+     """        if (r.Y >= floor) {
+          r.Y = floor""",
+     """        if (r.Y >= floor) {
+          r.Y = floor
+          r.potBounced = 0"""),
+    ("android-rice-pot-blocks-feed-release",
+     """      } else if (riceOnGirl(b)) {
+        onRiceFed(b)""",
+     """      } else if (riceOnGirl(b) && !potBlocksFeed(b)) {
+        onRiceFed(b)"""),
+    ("android-rice-pot-blocks-feed-drop",
+     """    if (!b.iron && riceOnGirl(b)) onRiceFed(b)""",
+     """    if (!b.iron && riceOnGirl(b) && !potBlocksFeed(b)) onRiceFed(b)"""),
+    ("android-rice-pot-blocks-feed",
+     """      if (!r.iron && !r.fed && riceOnGirl(r)) onRiceFed(r)""",
+     """      if (!r.iron && !r.fed && riceOnGirl(r) && !potBlocksFeed(r)) onRiceFed(r)"""),
 
 ]
 

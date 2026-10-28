@@ -5,7 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -14,6 +17,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.DisplayMetrics;
@@ -74,6 +78,7 @@ public class OverlayService extends Service {
 
     private volatile String balanceJson = "{\"ok\":false}";
     private ScheduledExecutorService poller;
+    private BroadcastReceiver screenReceiver;
     private volatile long lastFetchAt;
     private long lastBuzzAt;
     private long lastRegionLog;
@@ -124,6 +129,7 @@ public class OverlayService extends Service {
         density = getResources().getDisplayMetrics().density;
         measureScreen();
         startPoller();
+        watchScreen();
     }
 
     @Override
@@ -572,9 +578,44 @@ public class OverlayService extends Service {
         poller.scheduleWithFixedDelay(new Runnable() {
             @Override
             public void run() {
+                // Nothing on screen is watching a dark display: skip the call instead of
+                // waking the radio every ten seconds all night.
+                if (!screenOn) return;
                 fetchBalance();
             }
         }, 0, 10, TimeUnit.SECONDS);
+    }
+
+    private volatile boolean screenOn = true;
+
+    private void watchScreen() {
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        screenOn = pm == null || pm.isInteractive();
+        screenReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                boolean on = Intent.ACTION_SCREEN_ON.equals(intent.getAction());
+                screenOn = on;
+                if (on) {
+                    // Catch up right away so the tablet is never showing last night's number.
+                    final ScheduledExecutorService p = poller;
+                    if (p != null && !p.isShutdown()) {
+                        try {
+                            p.execute(new Runnable() {
+                                @Override
+                                public void run() {
+                                    fetchBalance();
+                                }
+                            });
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+            }
+        };
+        IntentFilter f = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        f.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(screenReceiver, f);
     }
 
     private void fetchBalance() {
@@ -674,6 +715,13 @@ public class OverlayService extends Service {
     public void onDestroy() {
         RUNNING = false;
         if (poller != null) poller.shutdownNow();
+        if (screenReceiver != null) {
+            try {
+                unregisterReceiver(screenReceiver);
+            } catch (Throwable ignored) {
+            }
+            screenReceiver = null;
+        }
         if (debugView != null) {
             try {
                 wm.removeView(debugView);

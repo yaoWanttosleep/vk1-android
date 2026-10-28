@@ -14,7 +14,7 @@ import arsc  # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DEPS = os.path.join(ROOT, "deps")
-FALLBACK = "/root/工作文件夹/tools"
+FALLBACK = os.path.join(os.path.dirname(ROOT), "依赖")
 
 
 def _dep(name, fallback):
@@ -73,7 +73,7 @@ def manifest(app_label):
     return el("manifest", [
         (None, "package", "string", PACKAGE),
         ("android", "versionCode", "int", 2),
-        ("android", "versionName", "string", "1.4.3"),
+        ("android", "versionName", "string", "1.4.4"),
     ], children)
 
 

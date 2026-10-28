@@ -529,6 +529,8 @@ public class OverlayService extends Service {
         @JavascriptInterface
         public void buzz() {
             try {
+                if (!getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+                        .getBoolean(MainActivity.KEY_VIBRATE, true)) return;
                 long now = System.currentTimeMillis();
                 if (now - lastBuzzAt < 400) return;
                 lastBuzzAt = now;

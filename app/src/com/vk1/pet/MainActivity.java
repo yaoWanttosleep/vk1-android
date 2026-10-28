@@ -26,6 +26,7 @@ public class MainActivity extends Activity {
     static final String KEY_DEBUG = "debug";
     static final String KEY_ALPHA = "alpha";
     static final String KEY_COMPAT = "compat";
+    static final String KEY_VIBRATE = "vibrate";
 
     private EditText keyInput;
     private TextView status;
@@ -117,6 +118,14 @@ public class MainActivity extends Activity {
             public void onStopTrackingTouch(android.widget.SeekBar bar) {
             }
         });
+
+        android.widget.CheckBox vibrate = new android.widget.CheckBox(this);
+        vibrate.setText("扣费时震动");
+        vibrate.setTextSize(14);
+        vibrate.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_VIBRATE, true));
+        vibrate.setOnCheckedChangeListener((v, checked) ->
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_VIBRATE, checked).apply());
+        root.addView(vibrate);
 
         android.widget.CheckBox debug = new android.widget.CheckBox(this);
         debug.setText("显示调试信息（排查问题用，平时关着）");

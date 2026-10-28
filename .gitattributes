@@ -1,0 +1,8 @@
+# keep the language bar meaningful: the page inside the APK is upstream third-party code
+vendor/** linguist-vendored
+app/src/assets/vk1/widget.js linguist-vendored
+app/src/assets/vk1/*.png linguist-binary
+app/src/assets/vk1/*.mp3 linguist-binary
+docs/*.png linguist-documentation
+dist/*.apk linguist-generated
+tools/*.py linguist-language=Python

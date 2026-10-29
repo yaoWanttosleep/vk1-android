@@ -82,11 +82,54 @@
   window.addEventListener('error', onWidgetError)
 
   var BASE = 'file:///android_asset/vk1'
-  var EXPR_URL = {
-    happy: BASE + '/expression_11.png',
-    nervous: BASE + '/expression_22.png',
-    aloof: BASE + '/expression_12.png',
-    calm: BASE + '/expression_21.png',
+  function charSet(prefix) {
+    return {
+      happy: BASE + '/expression_' + prefix + '11.png',
+      nervous: BASE + '/expression_' + prefix + '22.png',
+      aloof: BASE + '/expression_' + prefix + '12.png',
+      calm: BASE + '/expression_' + prefix + '21.png',
+    }
+  }
+  var EXPR_URL = charSet('')
+  var CHAR_SETS = {
+    deepseek: charSet(''),
+    gpt: charSet('gpt_'),
+    claude: charSet('claude_'),
+    gemini: charSet('gemini_'),
+  }
+  // The untouched, edge-cropped sprites (the 1.6.x look). Third size step uses these.
+  var CHAR_SETS_CROP = {
+    deepseek: charSet(''),
+    gpt: charSet('gpt_crop_'),
+    claude: charSet('claude_crop_'),
+    gemini: charSet('gemini_crop_'),
+  }
+  window.__vk1Character = 'deepseek'
+  window.__vk1SetCharacter = function (name) {
+    var set = (charCrop() ? CHAR_SETS_CROP : CHAR_SETS)[name]
+    if (!set) return
+    // pushFlags() runs on every settings change (and on every tick of the stack-pot
+    // slider), so re-applying the SAME character would reload four images and force
+    // her expression back to happy each time. Nothing to do when it is already hers.
+    if (window.__vk1Character === name) return
+    window.__vk1Character = name
+    for (var k in EXPR_URL) if (set[k]) EXPR_URL[k] = set[k]
+    try {
+      for (var key in faces) {
+        if (!faces[key]) continue
+        faces[key].src = EXPR_URL[key]
+        if (flashes[key]) {
+          flashes[key].style.maskImage = 'url("' + EXPR_URL[key] + '")'
+          flashes[key].style.webkitMaskImage = 'url("' + EXPR_URL[key] + '")'
+        }
+      }
+      hitSrc = ''
+      updateHitSource()
+      try { layout() } catch (err) {}
+      state.expr = ''
+      setExpression('happy')
+      updateScreen()
+    } catch (err) {}
   }
   var EXPR_ORDER = ['happy', 'nervous', 'aloof', 'calm']
   var RICE_URL = BASE + '/rice.png'
@@ -436,17 +479,129 @@
   }
 
   // ------------------------------------------------------- layout / screen ---
+  // Character zoom. The three ported sprites are 3:2 while the canvas is 1:1, so at
+  // 100% their sides get cropped by a hard square edge. Scaling about the TABLET
+  // CENTRE keeps the tablet in her hands fixed, which is why the panel quad and the
+  // worn-pot anchor can share the exact same transform.
+  var CHAR_ZOOM_DEFAULT = 1
+  var CHAR_FIX_X = 625.8 / 768
+  var CHAR_FIX_Y = 639.2 / 768
+  function charCrop() {
+    if (window.__vk1Character === 'deepseek') return false
+    var z = window.__vk1Zoom
+    return typeof z === 'number' && z <= 0.1
+  }
+  function charZoom() {
+    // The fish is the original artwork measured for this canvas; leave it alone.
+    if (window.__vk1Character === 'deepseek') return 1
+    if (charCrop()) return 1          // the crop set is already full-bleed
+    var z = window.__vk1Zoom
+    if (!(z >= 0.5 && z <= 1.5)) z = CHAR_ZOOM_DEFAULT
+    return z
+  }
+  function zoomAbout(x, y, k) {
+    return { x: CHAR_FIX_X + (x - CHAR_FIX_X) * k, y: CHAR_FIX_Y + (y - CHAR_FIX_Y) * k }
+  }
+  // The ported sprites are now composed WHOLE (1536x1024 shrunk to 768x512 and pinned to
+  // the bottom), so her hands are no longer where the fish's were. This affine maps the
+  // original tablet quad (768-space) onto the tablet in the whole-body art; it was solved
+  // from the three measured plate corners, not guessed.
+  // Tablet quad inside the pre-cropped (enlarged) sprites, measured from the baked art.
+  var CROP_QUAD = [[0.528, 0.730], [0.862, 0.679], [0.889, 0.859], [0.557, 0.910]]
+  var CHAR_QUAD_M = [0.5878, -0.0026, 289.1116, 0.0015, 0.5805, 297.3999]
   function quad() {
-    var sc = scaleOf()
+    var s768 = state.size / 768, k = charZoom(), m = CHAR_QUAD_M
+    var ported = window.__vk1Character !== 'deepseek' && !charCrop()
     var P = []
-    for (var i = 0; i < 4; i++) P.push({ x: QX[i] * sc, y: QY[i] * sc })
+    for (var i = 0; i < 4; i++) {
+      // QX/QY are in the 1024 artwork space; CHAR_QUAD_M was solved in 768 space.
+      var u = QX[i] * 0.75, v = QY[i] * 0.75
+      if (ported) {
+        P.push({ x: (m[0] * u + m[1] * v + m[2]) * s768,
+                 y: (m[3] * u + m[4] * v + m[5]) * s768 })
+      } else if (charCrop()) {
+        var cq = CROP_QUAD[i]
+        P.push({ x: cq[0] * state.size, y: cq[1] * state.size })
+      } else {
+        P.push({ x: QX[i] * scaleOf(), y: QY[i] * scaleOf() })
+      }
+    }
+    if (k !== 1) {
+      var cx = (P[0].x + P[1].x + P[2].x + P[3].x) / 4
+      var cy = (P[0].y + P[1].y + P[2].y + P[3].y) / 4
+      for (var j = 0; j < 4; j++) {
+        P[j].x = cx + (P[j].x - cx) * k
+        P[j].y = cy + (P[j].y - cy) * k
+      }
+    }
     var lw = Math.sqrt(Math.pow(P[1].x - P[0].x, 2) + Math.pow(P[1].y - P[0].y, 2))
     var lh = Math.sqrt(Math.pow(P[3].x - P[0].x, 2) + Math.pow(P[3].y - P[0].y, 2))
     return { P: P, lw: lw, lh: lh }
   }
 
+  var zoomLogged = ''
+  // Worn-pot geometry is computed once when it lands on her head, so switching character
+  // (or size step) left the old pot at the old scale — on the fish it looked like a tiny
+  // hat. Re-derive size and anchor for anything already worn whenever the look changes.
+  function refreshBowlSizes() {
+    for (var i = 0; i < state.bowls.length; i++) {
+      var b = state.bowls[i]
+      if (!b || !b.el) continue
+      var st = b.iron ? (b.onHead ? ironWornSize() : ironLooseSize()) : riceDims()
+      if (b.artW !== st.w || b.artH !== st.h) {
+        b.artW = st.w; b.artH = st.h; b.R = st.w * 0.42
+        b.el.style.width = st.w + 'px'
+        b.el.style.height = st.h + 'px'
+      }
+      if (b.iron && b.onHead) {
+        var an = ironHeadAnchor(b)
+        b.X = an.x; b.Y = an.y; b.headY = an.y; b.headTarget = an.y
+      }
+    }
+  }
+  function applyCharZoom() {
+    var k = charZoom()
+    var zoomTag = (window.__vk1Character || '?') + ' k=' + k + ' raw=' + window.__vk1Zoom
+    if (zoomTag !== zoomLogged) {
+      zoomLogged = zoomTag
+      try { VK1.log('zoom ' + zoomTag) } catch (err) {}
+    }
+    refreshBowlSizes()
+    // Box the artwork instead of transform:scale(). A CSS transform on the <img> left the
+    // canvas unmoved on this WebView (the log showed k arriving but nothing shrank), and
+    // sizing also keeps the art's mask-image in step with the pixels.
+    var wPct = (k * 100) + '%'
+    var lPct = (CHAR_FIX_X * (1 - k) * 100) + '%'
+    var tPct = (CHAR_FIX_Y * (1 - k) * 100) + '%'
+    for (var key in faces) {
+      var im = faces[key]
+      if (!im) continue
+      im.style.width = wPct
+      im.style.height = wPct
+      im.style.left = lPct
+      im.style.top = tPct
+    }
+    for (var fk in flashes) {
+      var fl = flashes[fk]
+      if (!fl) continue
+      fl.style.width = wPct
+      fl.style.height = wPct
+      fl.style.left = lPct
+      fl.style.top = tPct
+    }
+    try {
+      var probe = faces.happy
+      if (probe) {
+        VK1.log('zoombox want=' + wPct + ' img=' + Math.round(probe.getBoundingClientRect().width) +
+          ' art=' + Math.round(art.getBoundingClientRect().width) +
+          ' root=' + Math.round(root.getBoundingClientRect().width) +
+          ' inline=' + probe.style.width)
+      }
+    } catch (err) {}
+  }
   function layout() {
     root.style.setProperty('--dshvk1-s', state.size + 'px')
+    applyCharZoom()
     var flip = mirrored()
     root.classList.toggle('dshvk1-mirror', flip)
     var q = quad()
@@ -599,12 +754,24 @@
     stage.appendChild(el)
     return el
   }
+  // The pot has to breathe with the character: shrink her 16% and an unscaled pot
+  // would swallow her whole head. Everything downstream (hit radius, mask, stacking
+  // offset) is derived from these two numbers, so scaling here is enough.
+  var CHAR_POT_K = 0.5875   // whole-body art is 0.5/0.851 of the old crop, so the pot shrinks too
+  function potScale() {
+    if (window.__vk1Character === 'deepseek') return 1
+    if (charCrop()) return CHAR_POT_K * 1.45
+    return CHAR_POT_K * charZoom()
+  }
   function ironLooseSize() {
+    // Loose pots keep full size on purpose: shrinking them with the art made them too
+    // small to grab with a finger. Only the worn one follows the character.
     var w = Math.max(24, Math.round(state.size * IRON_W_LOOSE))
     return { w: w, h: Math.max(8, Math.round(w * (IRON_H_WORN / IRON_W_WORN))) }
   }
   function ironWornSize() {
-    return { w: Math.max(24, Math.round(state.size * IRON_W_WORN)), h: Math.max(8, Math.round(state.size * IRON_H_WORN)) }
+    var k = potScale()
+    return { w: Math.max(24, Math.round(state.size * IRON_W_WORN * k)), h: Math.max(8, Math.round(state.size * IRON_H_WORN * k)) }
   }
   var riceSizeCache = null
   function riceDims() {
@@ -752,7 +919,62 @@
     return false
   }
 
-  function ironAnchorX() { return state.left + state.size * (mirrored() ? (1 - 0.5558) : 0.5558) }
+  // 网页原版（蓝色大肥鱼）的锚点：上游量出来的，别动。
+  // 以后加角色也不要往这里塞，新角色单独进下面的表。
+  var FISH_HEAD = { x: 0.5558, y: 0.30, tilt: 0 }
+  // 从 macOS 版搬来的三只：立绘更高、头更小，各自量过。
+  // 只放「和鱼不一样」的角色，鱼不在这里。
+  // whole-body art (1536x1024 shrunk to 768x512, bottom aligned)
+  var CHAR_HEAD = {
+    gpt: { x: 0.684, y: 0.508, tilt: -3.5 },
+    claude: { x: 0.682, y: 0.508, tilt: -3.5 },
+    gemini: { x: 0.677, y: 0.508, tilt: -3.5 },
+  }
+  // the old edge-cropped art keeps the anchors it was tuned with
+  var CHAR_HEAD_CROP = {
+    gpt: { x: 0.519, y: 0.2954, tilt: -3.5 },
+    claude: { x: 0.519, y: 0.2954, tilt: -3.5 },
+    gemini: { x: 0.519, y: 0.2954, tilt: -3.5 },
+  }
+  // The zoom slider lives in the native settings page; it pushes __vk1Zoom and then
+  // asks for a relayout. Without this the value only lands on the next physics frame.
+  // Switching between the whole-body set and the cropped set means new images, not just
+  // a relayout: the files differ. Reuse the same swap the character switch performs.
+  window.__vk1ApplyVariant = function () {
+    var base = window.__vk1Character
+    var set = (charCrop() ? CHAR_SETS_CROP : CHAR_SETS)[base]
+    if (!set) return
+    if (EXPR_URL.happy === set.happy) { try { layout() } catch (err) {} return }
+    try {
+      for (var k in EXPR_URL) if (set[k]) EXPR_URL[k] = set[k]
+      for (var key in faces) {
+        if (!faces[key]) continue
+        faces[key].src = EXPR_URL[key]
+        if (flashes[key]) {
+          flashes[key].style.maskImage = 'url("' + EXPR_URL[key] + '")'
+          flashes[key].style.webkitMaskImage = 'url("' + EXPR_URL[key] + '")'
+        }
+      }
+      hitSrc = ''
+      updateHitSource()
+      state.expr = ''
+      setExpression('happy')
+      layout()
+    } catch (err) {}
+  }
+  window.__vk1Relayout = function () { try { layout() } catch (err) {} }
+  function headTune() {
+    var table = charCrop() ? CHAR_HEAD_CROP : CHAR_HEAD
+    var t = table[window.__vk1Character] || FISH_HEAD
+    var k = charZoom()
+    if (k === 1) return t
+    var p = zoomAbout(t.x, t.y, k)
+    return { x: p.x, y: p.y, tilt: t.tilt }
+  }
+  function ironAnchorX() {
+    var hx = headTune().x
+    return state.left + state.size * (mirrored() ? (1 - hx) : hx)
+  }
   var wornSequence = 0
   function ironStackIndex(p) {
     var index = 0
@@ -764,7 +986,7 @@
   }
   function ironHeadAnchor(p) {
     var worn = ironWornSize()
-    var rimY = state.top + state.size * 0.3639
+    var rimY = state.top + state.size * headTune().y
     return { x: Math.round(ironAnchorX()), y: Math.round(rimY - worn.h / 2 - (p ? ironStackIndex(p) : 0) * worn.h * 2 / 3), w: worn.w, h: worn.h }
   }
   function wornPot() {
@@ -1177,7 +1399,9 @@
     // even while a deduction plays (their own test is named "stillCalmWhileCharging").
     // Here the charge expression wins, so the planchette still reads as reacting to the
     // money going out. Calm keeps its place ahead of aloof.
-    if (pat.active) want = 'happy'
+    // Upstream hard-codes 'happy' here, which looks identical to her resting face,
+    // so petting gave no visual feedback at all. The choice is a setting now.
+    if (pat.active) want = window.__vk1PatExpr || 'happy'
     else if (cueRunning && state.fxHurt) { want = 'nervous'; state.nervousT = NERVOUS_HOLD }
     else if (state.nervousT > 0) want = 'nervous'
     else if (headPotOn && !anyBowl) want = 'calm'
@@ -1302,7 +1526,7 @@
         // horizontal scale: M' = T(2C-X, Y) R(-T) S(-sw, sh) T(-c).
         var flip = mirrored() ? -1 : 1
         tf = 'translate(' + Math.round(r.X) + 'px,' + Math.round(r.Y) + 'px)' +
-          ' rotate(' + (flip * -IRON_TILT_DEG) + 'deg)' +
+          ' rotate(' + (flip * (-IRON_TILT_DEG + headTune().tilt)) + 'deg)' +
           ' scale(' + (flip * sw).toFixed(3) + ',' + sh.toFixed(3) + ')' +
           ' translate(' + (-r.artW / 2).toFixed(1) + 'px,' + (-r.artH / 2).toFixed(1) + 'px)'
       } else {
@@ -1493,7 +1717,11 @@
       var probe = new Image()
       probe.onload = function () {
         try {
-          hitCanvas.getContext('2d').drawImage(probe, 0, 0, 610, 610)
+          var kz = charZoom()
+          var hc = hitCanvas.getContext('2d')
+          hc.clearRect(0, 0, 610, 610)
+          var side = 610 * kz
+          hc.drawImage(probe, 610 * CHAR_FIX_X * (1 - kz), 610 * CHAR_FIX_Y * (1 - kz), side, side)
           hitReady = true
         } catch (err) {}
       }
@@ -1535,8 +1763,8 @@
     potMask.url = ''
     try {
       var W = state.size
-      var cx = W * 0.5558
-      var rimY = W * 0.3639
+      var cx = W * headTune().x
+      var rimY = W * headTune().y
       var pad = Math.ceil(W * 0.02)                 // covers the worn tilt
       var x0 = Math.floor(cx - worn.w / 2 - pad)
       // Rasterise the pot exactly where the worn pot is drawn — same centre, same tilt —
@@ -1555,7 +1783,7 @@
       // to the right edge, so the mask's content must be the UNMIRRORED pot placement in
       // every case. Mirroring it here as well would flip twice and leave the erase boundary
       // 2*6.23deg out of step with the pot.
-      tg.rotate(-IRON_TILT_DEG * Math.PI / 180)
+      tg.rotate((IRON_TILT_DEG - headTune().tilt) * Math.PI / 180)
       tg.drawImage(potArt, -worn.w / 2, -worn.h / 2, worn.w, worn.h)
       tg.restore()
       var alpha = tg.getImageData(0, 0, t.width, t.height).data

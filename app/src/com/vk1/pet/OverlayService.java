@@ -179,9 +179,18 @@ public class OverlayService extends Service {
             boolean radar = sp.getBoolean(MainActivity.KEY_RADAR, true);
             boolean magnet = sp.getBoolean(MainActivity.KEY_MAGNET, true);
             int maxPots = sp.getInt(MainActivity.KEY_MAXPOTS, 5);
+            String chr = sp.getString(MainActivity.KEY_CHAR, "deepseek");
+            int zoomPct = sp.getInt(MainActivity.KEY_ZOOM, MainActivity.ZOOM_DEFAULT);
+            String patExpr = sp.getString(MainActivity.KEY_PAT_EXPR, "happy");
             web.evaluateJavascript("window.__vk1RadarOff=" + (!radar) +
                     ";window.__vk1MagnetOff=" + (!magnet) +
-                    ";window.__vk1MaxPots=" + maxPots, null);
+                    ";window.__vk1MaxPots=" + maxPots +
+                    ";window.__vk1Zoom=" + (zoomPct / 100.0) +
+                    ";window.__vk1PatExpr='" + patExpr + "'" +
+                    ";window.__vk1SetCharacter&&window.__vk1SetCharacter('" + chr + "')" +
+                    ";window.__vk1ApplyVariant&&window.__vk1ApplyVariant()" +
+                    ";window.__vk1Relayout&&window.__vk1Relayout()", null);
+            logFile("flags pushed: char=" + chr + " zoom=" + zoomPct + "% maxPots=" + maxPots);
         } catch (Throwable t) {
             logFile("flag push failed: " + t);
         }

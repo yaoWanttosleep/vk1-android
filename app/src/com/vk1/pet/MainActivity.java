@@ -30,6 +30,20 @@ public class MainActivity extends Activity {
     static final String KEY_RADAR = "radar";
     static final String KEY_MAGNET = "magnet";
     static final String KEY_MAXPOTS = "max_pots";
+    static final String KEY_CHAR = "character";
+    static final String KEY_ZOOM = "char_zoom";
+    private TextView zoomLabelView;
+    private android.widget.Spinner zoomSpinnerView;
+    static final String KEY_PAT_EXPR = "pat_expr";
+    static final String[] PAT_EXPR_IDS = {"happy", "nervous", "aloof", "calm"};
+    static final String[] PAT_EXPR_NAMES = {"开心（原版行为，和平时一样）", "紧张", "傲娇", "冷脸"};
+    static final int ZOOM_DEFAULT = 100;      // percent; 100 = the size the canvas was designed for
+    // Three sizes instead of a slider: the sprites are 3:2 on a 1:1 canvas, so these are
+    // the only three looks worth offering (crop / whole / small).
+    static final int[] ZOOM_PCTS = {85, 100, 0};
+    static final String[] ZOOM_NAMES = {"完整（85%，小一点）", "完整（100%）", "原版（裁剪，1.6.x 的样子）"};
+    static final String[] CHAR_IDS = {"deepseek", "gpt", "claude", "gemini"};
+    static final String[] CHAR_NAMES = {"蓝色大肥鱼（DeepSeek）", "GPT 龙娘", "Claude 大小姐", "Gemini 猫娘"};
 
     private EditText keyInput;
     private TextView status;
@@ -85,7 +99,6 @@ public class MainActivity extends Activity {
         LinearLayout row3 = row();
         row3.addView(button("停止桌宠", v -> stopPet()));
         row3.addView(button("隐藏本页", v -> moveTaskToBack(true)));
-        row3.addView(button("导出日志", v -> exportLog()));
         root.addView(row3);
 
         TextView alphaLabel = new TextView(this);
@@ -130,6 +143,112 @@ public class MainActivity extends Activity {
         vibrate.setOnCheckedChangeListener((v, checked) ->
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_VIBRATE, checked).apply());
         root.addView(vibrate);
+
+        TextView charLabel = new TextView(this);
+        charLabel.setText("角色");
+        charLabel.setTextSize(14);
+        charLabel.setPadding(0, (int) (16 * d), 0, 0);
+        root.addView(charLabel);
+
+        android.widget.Spinner charSpinner = new android.widget.Spinner(this);
+        android.widget.ArrayAdapter<String> charAdapter = new android.widget.ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, CHAR_NAMES);
+        charSpinner.setAdapter(charAdapter);
+        String savedChar = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_CHAR, "deepseek");
+        for (int ci = 0; ci < CHAR_IDS.length; ci++) {
+            if (CHAR_IDS[ci].equals(savedChar)) charSpinner.setSelection(ci);
+        }
+        charSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, android.view.View view,
+                                       int position, long id) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString(KEY_CHAR, CHAR_IDS[position]).apply();
+                // The size steps only exist for the ported sprites; the fish is untouched.
+                boolean fish = "deepseek".equals(CHAR_IDS[position]);
+                int vis = fish ? android.view.View.GONE : android.view.View.VISIBLE;
+                if (zoomLabelView != null) zoomLabelView.setVisibility(vis);
+                if (zoomSpinnerView != null) zoomSpinnerView.setVisibility(vis);
+                pushFlags();
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+            }
+        });
+        root.addView(charSpinner);
+
+        TextView zoomLabel = new TextView(this);
+        zoomSpinnerView = null;
+        zoomLabelView = zoomLabel;
+        zoomLabel.setText("角色大小（新角色）");
+        zoomLabel.setTextSize(14);
+        zoomLabel.setPadding(0, (int) (14 * d), 0, 0);
+        root.addView(zoomLabel);
+
+        final android.widget.Spinner zoomSpinner = new android.widget.Spinner(this);
+        android.widget.ArrayAdapter<String> zoomAdapter = new android.widget.ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, ZOOM_NAMES);
+        zoomSpinner.setAdapter(zoomAdapter);
+        int zoomStart = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_ZOOM, ZOOM_DEFAULT);
+        // 1.7.9 stored an arbitrary percentage from its slider; snap it to the nearest
+        // step and write that back, otherwise the dropdown says "大" while the widget
+        // is actually running something else.
+        int best = 0;
+        for (int zi = 1; zi < ZOOM_PCTS.length; zi++) {
+            if (Math.abs(ZOOM_PCTS[zi] - zoomStart) < Math.abs(ZOOM_PCTS[best] - zoomStart)) best = zi;
+        }
+        zoomSpinner.setSelection(best);
+        if (ZOOM_PCTS[best] != zoomStart) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(KEY_ZOOM, ZOOM_PCTS[best]).apply();
+        }
+        zoomSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, android.view.View view,
+                                       int position, long id) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putInt(KEY_ZOOM, ZOOM_PCTS[position]).apply();
+                pushFlags();
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+            }
+        });
+        root.addView(zoomSpinner);
+        zoomSpinnerView = zoomSpinner;
+        boolean zoomIsFish = "deepseek".equals(CHAR_IDS[charSpinner.getSelectedItemPosition()]);
+        zoomLabel.setVisibility(zoomIsFish ? android.view.View.GONE : android.view.View.VISIBLE);
+        zoomSpinner.setVisibility(zoomIsFish ? android.view.View.GONE : android.view.View.VISIBLE);
+
+        TextView patLabel = new TextView(this);
+        patLabel.setText("摸头时的表情");
+        patLabel.setTextSize(14);
+        patLabel.setPadding(0, (int) (14 * d), 0, 0);
+        root.addView(patLabel);
+
+        final android.widget.Spinner patSpinner = new android.widget.Spinner(this);
+        android.widget.ArrayAdapter<String> patAdapter = new android.widget.ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, PAT_EXPR_NAMES);
+        patSpinner.setAdapter(patAdapter);
+        String savedPat = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_PAT_EXPR, "happy");
+        for (int pi = 0; pi < PAT_EXPR_IDS.length; pi++) {
+            if (PAT_EXPR_IDS[pi].equals(savedPat)) patSpinner.setSelection(pi);
+        }
+        patSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, android.view.View view,
+                                       int position, long id) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString(KEY_PAT_EXPR, PAT_EXPR_IDS[position]).apply();
+                pushFlags();
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+            }
+        });
+        root.addView(patSpinner);
 
         final TextView potLabel = new TextView(this);
         final int potStart = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_MAXPOTS, 5);

@@ -11,7 +11,7 @@ import java.io.StringWriter;
 
 /** Keeps the last crash trace inside the app sandbox so the setup screen can show it. */
 final class CrashLog {
-    private static final String FILE = "crash.txt";
+    static final String FILE = "crash.txt";
 
     static void install(final Context ctx) {
         final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();

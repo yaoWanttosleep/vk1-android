@@ -54,6 +54,7 @@ public class OverlayService extends Service {
     private static final String LOG_NAME = "vk1.log";
     static final String EXTRA_ALPHA = "alpha";
     static final String EXTRA_COMPAT = "compat";
+    static final String EXTRA_FLAGS = "flags";
     static volatile boolean RUNNING;
 
     private WindowManager wm;
@@ -135,6 +136,14 @@ public class OverlayService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (web == null) showPet();
+        if (intent != null && intent.hasExtra(EXTRA_FLAGS)) {
+            main.post(new Runnable() {
+                @Override
+                public void run() {
+                    applyFlags();
+                }
+            });
+        }
         if (intent != null && intent.hasExtra(EXTRA_ALPHA)) {
             final int pct = intent.getIntExtra(EXTRA_ALPHA, 100);
             main.post(new Runnable() {
@@ -157,6 +166,19 @@ public class OverlayService extends Service {
             wm.getDefaultDisplay().getRealMetrics(dm);
             screenW = dm.widthPixels;
             screenH = dm.heightPixels;
+        }
+    }
+
+    private void applyFlags() {
+        if (web == null) return;
+        try {
+            SharedPreferences sp = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
+            boolean radar = sp.getBoolean(MainActivity.KEY_RADAR, true);
+            boolean magnet = sp.getBoolean(MainActivity.KEY_MAGNET, true);
+            web.evaluateJavascript("window.__vk1RadarOff=" + (!radar) +
+                    ";window.__vk1MagnetOff=" + (!magnet), null);
+        } catch (Throwable t) {
+            logFile("flag push failed: " + t);
         }
     }
 
@@ -209,6 +231,7 @@ public class OverlayService extends Service {
             @Override
             public void onPageFinished(WebView view, String url) {
                 logFile("page finished " + url);
+                applyFlags();
             }
         });
 

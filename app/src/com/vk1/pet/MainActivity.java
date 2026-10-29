@@ -27,6 +27,8 @@ public class MainActivity extends Activity {
     static final String KEY_ALPHA = "alpha";
     static final String KEY_COMPAT = "compat";
     static final String KEY_VIBRATE = "vibrate";
+    static final String KEY_RADAR = "radar";
+    static final String KEY_MAGNET = "magnet";
 
     private EditText keyInput;
     private TextView status;
@@ -82,6 +84,7 @@ public class MainActivity extends Activity {
         LinearLayout row3 = row();
         row3.addView(button("停止桌宠", v -> stopPet()));
         row3.addView(button("隐藏本页", v -> moveTaskToBack(true)));
+        row3.addView(button("导出日志", v -> exportLog()));
         root.addView(row3);
 
         TextView alphaLabel = new TextView(this);
@@ -127,6 +130,26 @@ public class MainActivity extends Activity {
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_VIBRATE, checked).apply());
         root.addView(vibrate);
 
+        android.widget.CheckBox magnet = new android.widget.CheckBox(this);
+        magnet.setText("自动吸饭（锁定后饭自己飞过去被吃掉）");
+        magnet.setTextSize(14);
+        magnet.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_MAGNET, true));
+        magnet.setOnCheckedChangeListener((v, checked) -> {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_MAGNET, checked).apply();
+            pushFlags();
+        });
+        root.addView(magnet);
+
+        android.widget.CheckBox radar = new android.widget.CheckBox(this);
+        radar.setText("火控雷达显示（绿括号 + 距离/接近率）");
+        radar.setTextSize(14);
+        radar.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_RADAR, true));
+        radar.setOnCheckedChangeListener((v, checked) -> {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_RADAR, checked).apply();
+            pushFlags();
+        });
+        root.addView(radar);
+
         android.widget.CheckBox debug = new android.widget.CheckBox(this);
         debug.setText("显示调试信息（排查问题用，平时关着）");
         debug.setTextSize(13);
@@ -158,6 +181,70 @@ public class MainActivity extends Activity {
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
         }
+    }
+
+    private void pushFlags() {
+        if (!OverlayService.RUNNING) return;
+        startService(new Intent(this, OverlayService.class)
+                .putExtra(OverlayService.EXTRA_FLAGS, true));
+    }
+
+    // The widget log lives in Android/data, which no file manager can open on Android 11+,
+    // so hand the user a copy they can actually send.
+    private void exportLog() {
+        try {
+            StringBuilder sb = new StringBuilder();
+            java.io.File ext = getExternalFilesDir(null);
+            java.io.File widgetLog = ext == null ? null : new java.io.File(ext, "vk1.log");
+            if (widgetLog != null && widgetLog.exists()) {
+                sb.append(readFile(widgetLog));
+            }
+            java.io.File crash = new java.io.File(getFilesDir(), CrashLog.FILE);
+            if (crash.exists()) sb.append("\n---- crash ----\n").append(readFile(crash));
+            if (sb.length() == 0) {
+                toastStatus("还没有日志：把挂件跑一会儿，出过问题再来导出。");
+                return;
+            }
+            String name = "vk1-log-" + new java.text.SimpleDateFormat("MMdd-HHmm", java.util.Locale.US)
+                    .format(new java.util.Date()) + ".log";
+            String where;
+            if (Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues cv = new android.content.ContentValues();
+                cv.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name);
+                cv.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+                cv.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS);
+                android.net.Uri uri = getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                if (uri == null) throw new java.io.IOException("MediaStore insert failed");
+                java.io.OutputStream os = getContentResolver().openOutputStream(uri);
+                if (os == null) throw new java.io.IOException("no output stream");
+                os.write(sb.toString().getBytes("UTF-8"));
+                os.close();
+                where = "Download/" + name;
+            } else {
+                java.io.File dir = new java.io.File(
+                        android.os.Environment.getExternalStoragePublicDirectory(
+                                android.os.Environment.DIRECTORY_DOWNLOADS), name);
+                java.io.FileOutputStream fo = new java.io.FileOutputStream(dir);
+                fo.write(sb.toString().getBytes("UTF-8"));
+                fo.close();
+                where = dir.getAbsolutePath();
+            }
+            toastStatus("日志已导出：" + where);
+        } catch (Throwable t) {
+            toastStatus("导出失败：" + t);
+        }
+    }
+
+    private static String readFile(java.io.File f) throws java.io.IOException {
+        java.io.BufferedReader r = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(f), "UTF-8"));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = r.readLine()) != null) sb.append(line).append('\n');
+        r.close();
+        return sb.toString();
     }
 
     private LinearLayout row() {

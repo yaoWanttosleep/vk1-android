@@ -465,8 +465,10 @@ PATCHES = [
       // Iron is springy enough to throw it clear, and the harder it lands the further it
       // goes — a fixed throttle made every drop bounce the same two weak hops.
       r.VY = -impact * 0.45
-      var dir = r.X < pot.X ? -1 : 1
-      if (Math.abs(r.X - pot.X) < 2) dir = Math.random() < 0.5 ? -1 : 1
+      // Push it toward the open half of the screen: she is usually docked against one edge,
+      // and shoving the bowl into that wall made it ping between wall and pot, stuck.
+      var vsb = viewportRect()
+      var dir = (vsb.right - pot.X) > (pot.X - vsb.left) ? 1 : -1
       // Capped: a short drop used to fling the bowl most of the way across the screen.
       r.VX = dir * Math.min(260, Math.max(70, Math.abs(r.VX) * 0.35 + impact * 0.22))
       r.potBounced = 1
@@ -476,14 +478,25 @@ PATCHES = [
       potBounceCount++
       playPool(landPool)
       if (ANDROID && potBounceCount < 6) ANDROID.log('rice bounce ' + potBounceCount +
-        ' y=' + Math.round(r.Y) + ' vy=' + Math.round(r.VY))
+        ' x=' + Math.round(r.X) + ' y=' + Math.round(r.Y) + ' vy=' + Math.round(r.VY) +
+        ' vx=' + Math.round(r.VX) + ' potX=' + Math.round(pot.X))
       return true
     }
     // Set down gently: iron does not spring. Ride the lid and slip off the rim instead of
     // hammering the same spot, which is what made close drops look like a stuck animation.
     r.Y = surface - r.R
     if (r.VY > 0) r.VY = 0
-    r.VX = (r.X < pot.X ? -1 : 1) * Math.max(70, Math.abs(r.VX) * 0.8)
+    var vsg = viewportRect()
+    var dirg = (vsg.right - pot.X) > (pot.X - vsg.left) ? 1 : -1
+    r.VX = dirg * Math.max(70, Math.abs(r.VX) * 0.8)
+    // If something still pins it against the pot (a wall, the docked edge), stop being
+    // polite and flick it clear instead of letting it sit there for the rest of the day.
+    r.potT = (r.potT || 0) + (dt || 0.016)
+    if (r.potT > 0.5) {
+      r.potT = 0
+      r.VX = dirg * 240
+      r.VY = -150
+    }
     r.potBounced = 1
     r.grounded = false
     return true
@@ -511,6 +524,31 @@ PATCHES = [
     ("android-rice-pot-blocks-feed",
      """      if (!r.iron && !r.fed && riceOnGirl(r)) onRiceFed(r)""",
      """      if (!r.iron && !r.fed && riceOnGirl(r) && !potBlocksFeed(r)) onRiceFed(r)"""),
+
+    # Two independent switches: the bracket overlay, and the magnet that flies the rice to
+    # her once the lock settles. Turning the display off must not silently disable the feed.
+    ("android-radar-display-off",
+     """  function renderRadar(list) {""",
+     """  function renderRadar(list) {
+    if (window.__vk1RadarOff) {
+      if (radarSvg.firstChild) radarSvg.innerHTML = ''
+      return
+    }"""),
+    ("android-radar-magnet-off",
+     """    var magnet = state.lockAll && state.lockT >= LOCK_DELAY""",
+     """    var magnet = state.lockAll && state.lockT >= LOCK_DELAY && !window.__vk1MagnetOff"""),
+
+    # Facing is decided from state.h, which only gets set when her centre passes the 3/4
+    # line. A big pet is wider than half the screen, so its centre can never reach that
+    # line: h stayed null, she kept the unmirrored sprite and ended up staring into the
+    # right-hand wall. Fall back to whichever half she actually occupies.
+    ("android-mirror-by-position",
+     """  function mirrored() { return state.h === 'right' }""",
+     """  function mirrored() {
+    if (state.h === 'right') return true
+    if (state.h === 'left') return false
+    return state.left + state.size / 2 > (viewport().w || 0) / 2
+  }"""),
 
 ]
 

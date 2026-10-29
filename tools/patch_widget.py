@@ -588,6 +588,32 @@ PATCHES = [
     r.key = key; r.t = now
     ANDROID.touchRegions(JSON.stringify(rects))"""),
 
+    # A top-up raises the true balance straight away but is only booked when its bowl is
+    # eaten. Until then bookedAt sits BELOW the true balance, so the next poll lands in the
+    # "balance is above the book" branch and silently re-syncs the book to the new figure —
+    # the readout jumps at once, and then the bowl adds the same money a second time.
+    # Result: she shows +10 for a +5 top-up and then drips -0.01 forever trying to walk it
+    # back. While a credit is still waiting in a bowl, that branch must do nothing.
+    ("android-topup-pending-guard",
+     """        if (owed < -1e-9) {
+          owed = state.pending
+          state.bookedAt = round4(bal + owed)
+          state.bookedBal = round4(bal + owed)
+        }""",
+     """        if (owed < -1e-9) {
+          if (state.creditPending > 1e-9) {
+            // The difference IS the bowl still sitting on screen. Leave the book alone:
+            // feeding it will apply exactly this much.
+            owed = 0
+            state.pending = 0
+            state.dueGap = 0
+          } else {
+            owed = state.pending
+            state.bookedAt = round4(bal + owed)
+            state.bookedBal = round4(bal + owed)
+          }
+        }"""),
+
 ]
 
 

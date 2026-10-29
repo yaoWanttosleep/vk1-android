@@ -1204,9 +1204,17 @@
       } else {
         var owed = round4(state.bookedAt - bal)
         if (owed < -1e-9) {
-          owed = state.pending
-          state.bookedAt = round4(bal + owed)
-          state.bookedBal = round4(bal + owed)
+          if (state.creditPending > 1e-9) {
+            // The difference IS the bowl still sitting on screen. Leave the book alone:
+            // feeding it will apply exactly this much.
+            owed = 0
+            state.pending = 0
+            state.dueGap = 0
+          } else {
+            owed = state.pending
+            state.bookedAt = round4(bal + owed)
+            state.bookedBal = round4(bal + owed)
+          }
         }
         if (owed >= state.pendingStep - 1e-9) owed = round4(owed - state.pendingStep)
         else owed = 0

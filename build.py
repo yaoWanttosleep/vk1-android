@@ -72,8 +72,8 @@ def manifest(app_label):
     children.append(application)
     return el("manifest", [
         (None, "package", "string", PACKAGE),
-        ("android", "versionCode", "int", 9),
-        ("android", "versionName", "string", "1.5.1"),
+        ("android", "versionCode", "int", 10),
+        ("android", "versionName", "string", "1.5.2"),
     ], children)
 
 

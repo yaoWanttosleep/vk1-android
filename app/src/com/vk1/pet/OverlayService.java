@@ -59,7 +59,7 @@ public class OverlayService extends Service {
 
     private WindowManager wm;
     private WebView web;
-    private static final int MAX_SLOTS = 6;
+    private static final int MAX_SLOTS = 16;
     private final View[] slotView = new View[MAX_SLOTS];
     private final WindowManager.LayoutParams[] slotLp = new WindowManager.LayoutParams[MAX_SLOTS];
     private final int[] slotX = new int[MAX_SLOTS];
@@ -178,8 +178,10 @@ public class OverlayService extends Service {
             SharedPreferences sp = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
             boolean radar = sp.getBoolean(MainActivity.KEY_RADAR, true);
             boolean magnet = sp.getBoolean(MainActivity.KEY_MAGNET, true);
+            int maxPots = sp.getInt(MainActivity.KEY_MAXPOTS, 5);
             web.evaluateJavascript("window.__vk1RadarOff=" + (!radar) +
-                    ";window.__vk1MagnetOff=" + (!magnet), null);
+                    ";window.__vk1MagnetOff=" + (!magnet) +
+                    ";window.__vk1MaxPots=" + maxPots, null);
         } catch (Throwable t) {
             logFile("flag push failed: " + t);
         }
@@ -191,7 +193,11 @@ public class OverlayService extends Service {
             if (dir == null) return;
             if (!dir.exists()) dir.mkdirs();
             java.io.File f = new java.io.File(dir, LOG_NAME);
-            if (f.length() > 200_000) f.delete();
+            if (f.length() > 400_000) {
+                java.io.File old = new java.io.File(dir, LOG_NAME + ".1");
+                old.delete();
+                f.renameTo(old);
+            }
             java.io.FileWriter w = new java.io.FileWriter(f, true);
             w.write(new SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(new Date())
                     + " " + line + "\n");
@@ -352,6 +358,7 @@ public class OverlayService extends Service {
         return true;
     }
 
+    /** Her own window: touchable, because MIUI only dims non-touchable overlays. */
     private View ensureSlot(int i) {
         if (slotView[i] != null) return slotView[i];
         try {
@@ -582,10 +589,12 @@ public class OverlayService extends Service {
                                     webParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
                                     webParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
                                     setSlotsTouchable(false);
+
                                 } else {
                                     webParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
                                     webParams.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
                                     setSlotsTouchable(true);
+
                                 }
                                 applyWebParams();
                                 if (!on) {

@@ -573,9 +573,11 @@ PATCHES = [
     r.x0 = x0; r.y0 = y0; r.x1 = x1; r.y1 = y1; r.t = now
     ANDROID.touchRegion(x0, y0, x1, y1)""",
      """    var rects = [[state.left, state.top, state.left + state.size, state.top + state.size]]
-    for (var i = 0; i < state.bowls.length && rects.length < 6; i++) {
+    for (var i = 0; i < state.bowls.length && rects.length < 16; i++) {
       var b = state.bowls[i]
-      if (!b.el || b.fed) continue
+      // A worn pot needs no touch target of its own: it comes off by double-clicking her
+      // head, which is inside her own rect. Counting them starved the floor bowls.
+      if (!b.el || b.fed || b.onHead) continue
       rects.push([b.X - b.artW / 2, b.Y - b.artH / 2, b.X + b.artW / 2, b.Y + b.artH / 2])
     }
     var key = ''
@@ -685,6 +687,19 @@ PATCHES = [
     hands[frameIndex].style.left = (state.left + x) + 'px'
     hands[frameIndex].style.top = (state.top + y) + 'px'"""),
 
+
+    # A tall pot tower is funny for about five seconds and then it is a curtain over her
+    # face, so the cap is a setting (App 首页可控).
+    ("android-pot-stack-cap",
+     """    dropIronPot(bowl.X, bowl.Y)""",
+     """    var wornNow = 0
+    for (var wi = 0; wi < state.bowls.length; wi++) {
+      if (state.bowls[wi].onHead && state.bowls[wi].fadeT <= 0) wornNow++
+    }
+    var potCap = window.__vk1MaxPots
+    if (!(potCap > 0)) potCap = 5
+    if (wornNow < potCap) dropIronPot(bowl.X, bowl.Y)"""),
+
 ]
 
 
@@ -704,3 +719,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # The pane draws the worn pot; the copy here must stay invisible, including pots
+    # created after the handover.
+    ("android-char-hide-pots",
+     """      r.el.style.transform = tf
+      r.el.style.zIndex = r.onHead ? String(10 + ironStackIndex(r)) : '0'""",
+     """      r.el.style.transform = tf
+      r.el.style.visibility = (window.__vk1CharHidden && r.onHead) ? 'hidden' : 'visible'
+      r.el.style.zIndex = r.onHead ? String(10 + ironStackIndex(r)) : '0'"""),

@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     static final String KEY_VIBRATE = "vibrate";
     static final String KEY_RADAR = "radar";
     static final String KEY_MAGNET = "magnet";
+    static final String KEY_MAXPOTS = "max_pots";
 
     private EditText keyInput;
     private TextView status;
@@ -129,6 +130,35 @@ public class MainActivity extends Activity {
         vibrate.setOnCheckedChangeListener((v, checked) ->
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_VIBRATE, checked).apply());
         root.addView(vibrate);
+
+        final TextView potLabel = new TextView(this);
+        final int potStart = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_MAXPOTS, 5);
+        potLabel.setText("最多能往头上叠几个盆：" + potStart);
+        potLabel.setTextSize(14);
+        potLabel.setPadding(0, (int) (14 * d), 0, 0);
+        root.addView(potLabel);
+
+        final android.widget.SeekBar potBar = new android.widget.SeekBar(this);
+        potBar.setMax(9);                       // 1 .. 10
+        potBar.setProgress(Math.max(0, potStart - 1));
+        root.addView(potBar);
+        potBar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar bar, int progress, boolean fromUser) {
+                if (!fromUser) return;
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(KEY_MAXPOTS, progress + 1).apply();
+                potLabel.setText("最多能往头上叠几个盆：" + (progress + 1));
+                pushFlags();
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar bar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar bar) {
+            }
+        });
 
         android.widget.CheckBox magnet = new android.widget.CheckBox(this);
         magnet.setText("自动吸饭（锁定后饭自己飞过去被吃掉）");

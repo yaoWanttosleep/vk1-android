@@ -128,9 +128,11 @@
   function vk1ReportRegion(now) {
     if (!ANDROID) return
     var rects = [[state.left, state.top, state.left + state.size, state.top + state.size]]
-    for (var i = 0; i < state.bowls.length && rects.length < 6; i++) {
+    for (var i = 0; i < state.bowls.length && rects.length < 16; i++) {
       var b = state.bowls[i]
-      if (!b.el || b.fed) continue
+      // A worn pot needs no touch target of its own: it comes off by double-clicking her
+      // head, which is inside her own rect. Counting them starved the floor bowls.
+      if (!b.el || b.fed || b.onHead) continue
       rects.push([b.X - b.artW / 2, b.Y - b.artH / 2, b.X + b.artW / 2, b.Y + b.artH / 2])
     }
     var key = ''
@@ -700,7 +702,13 @@
       }
       spawnFloater('+' + fmt2(gain), h.x - state.size * 0.06, h.y - Math.round(2 * floaterStep()), true)
     }
-    dropIronPot(bowl.X, bowl.Y)
+    var wornNow = 0
+    for (var wi = 0; wi < state.bowls.length; wi++) {
+      if (state.bowls[wi].onHead && state.bowls[wi].fadeT <= 0) wornNow++
+    }
+    var potCap = window.__vk1MaxPots
+    if (!(potCap > 0)) potCap = 5
+    if (wornNow < potCap) dropIronPot(bowl.X, bowl.Y)
     // The original marks the canvas dirty on a credit; the readout must show the
     // money on this frame, not whenever the next cue happens to repaint it.
     updateScreen()

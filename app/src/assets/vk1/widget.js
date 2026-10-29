@@ -244,6 +244,7 @@
     '.dshvk1-bowl{position:absolute;left:0;top:0;pointer-events:none;will-change:transform;transform-origin:0 0}',
     '.dshvk1-heart{position:absolute;left:0;top:0;pointer-events:none;will-change:transform,opacity}',
     '.dshvk1-radar{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible}',
+    '.dshvk1-hands{position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:10002}',
     '.dshvk1-root{position:fixed;left:0;top:0;width:var(--dshvk1-s);height:var(--dshvk1-s);pointer-events:none;user-select:none;-webkit-user-select:none;z-index:9998;font-family:inherit;transition:left .16s ease,top .16s ease}',
     '.dshvk1-root.dshvk1-dragging{transition:none;cursor:grabbing}',
     '.dshvk1-body{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 100%}',
@@ -300,6 +301,9 @@
   radarSvg.setAttribute('class', 'dshvk1-radar')
   stage.appendChild(radarSvg)
   document.body.appendChild(stage)
+  var handLayer = document.createElement('div')
+  handLayer.className = 'dshvk1-hands'
+  document.body.appendChild(handLayer)
 
   var root = document.createElement('div')
   root.className = 'dshvk1-root'
@@ -1302,6 +1306,14 @@
           ' scale(' + sw.toFixed(3) + ',' + sh.toFixed(3) + ')' +
           ' translate(' + (-r.artW / 2).toFixed(1) + 'px,' + (-r.artH).toFixed(1) + 'px)'
       }
+      if (r.onHead && state.squash &&
+          (state.squash.sx !== 1 || state.squash.sy !== 1 || state.squash.tx || state.squash.ty)) {
+        var so = state.squash
+        tf = 'translate(' + so.ox.toFixed(1) + 'px,' + so.oy.toFixed(1) + 'px)' +
+          ' translate(' + so.tx.toFixed(1) + 'px,' + so.ty.toFixed(1) + 'px)' +
+          ' scale(' + so.sx.toFixed(4) + ',' + so.sy.toFixed(4) + ')' +
+          ' translate(' + (-so.ox).toFixed(1) + 'px,' + (-so.oy).toFixed(1) + 'px) ' + tf
+      }
       r.el.style.transform = tf
       r.el.style.zIndex = r.onHead ? String(10 + ironStackIndex(r)) : '0'
       if (r.fed) {
@@ -1402,6 +1414,15 @@
       // Keep the feet inside the webpage when she is pinned against the viewport's bottom.
       var patShift = Math.min(state.size * pi * 0.05 * pi * 0.0625, Math.max(0, viewport().h - state.top - state.size))
       shakeTf += ' translateY(' + patShift.toFixed(2) + 'px) scale(' + (1 + pi * 0.025) + ',' + (1 - pi * 0.0625) + ')'
+    }
+    state.squash = { sx: 1, sy: 1, tx: sx, ty: sy, ox: state.left + state.size / 2, oy: state.top + state.size }
+    if (squash > 0.001) { state.squash.sx *= 1 + squash * 0.10; state.squash.sy *= 1 - squash * 0.16 }
+    if (pat.active) {
+      var pis = Math.floor(pat.t / 0.04) % 5
+      state.squash.sx *= 1 + pis * 0.025
+      state.squash.sy *= 1 - pis * 0.0625
+      state.squash.ty += Math.min(state.size * pis * 0.05 * pis * 0.0625,
+        Math.max(0, viewport().h - state.top - state.size))
     }
     body.style.transform = shakeTf
 
@@ -2056,8 +2077,8 @@
     hand.src = BASE + '/pat_hand_' + hi + '.png'
     hand.alt = ''
     hand.draggable = false
-    hand.style.cssText = 'position:absolute;pointer-events:none;display:none;transform-origin:0 0'
-    root.appendChild(hand)
+    hand.style.cssText = 'position:absolute;pointer-events:none;display:none;transform-origin:0 0;z-index:40'
+    handLayer.appendChild(hand)
     hands.push(hand)
   }
   function blockPat() {
@@ -2102,10 +2123,7 @@
       pat.distance = Math.min(96, pat.distance + distance)
       if (pat.distance >= 24) pat.moveTime += dt
       if (!pat.active && !pat.waiting && pat.moveTime >= PAT_NEED) {
-        if (state.bowls.some(function (b) { return b.onHead })) {
-          if (pat.moveTime >= (ANDROID ? 0.7 : 0.5)) { knockPotOff(); pat.waiting = true }
-        }
-        else { pat.active = true; pat.t = 0 }
+        pat.active = true; pat.t = 0
       }
     } else {
       pat.idle += dt
@@ -2128,8 +2146,9 @@
     var y = 40 * (446 / 107) * k - palmY * h
     hands[frameIndex].style.width = w + 'px'
     hands[frameIndex].style.height = h + 'px'
-    hands[frameIndex].style.left = x + 'px'
-    hands[frameIndex].style.top = y + 'px'
+    // The layer is fixed to the viewport, so root-local becomes page coordinates.
+    hands[frameIndex].style.left = (state.left + x) + 'px'
+    hands[frameIndex].style.top = (state.top + y) + 'px'
     hands[frameIndex].style.transform = mirrored() ? 'scaleX(-1) translateX(-100%)' : ''
   }
 

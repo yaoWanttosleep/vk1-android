@@ -614,6 +614,77 @@ PATCHES = [
           }
         }"""),
 
+    # Upstream only ever takes the pot off with a deliberate double-click on her head
+    # (onDown already implements that). This port also knocked it off after 0.7 s of
+    # stroking, so every casual pat dropped the pot — reported as a bug, and it is one.
+    ("android-pat-keeps-pot",
+     """        if (state.bowls.some(function (b) { return b.onHead })) {
+          if (pat.moveTime >= (ANDROID ? 0.7 : 0.5)) { knockPotOff(); pat.waiting = true }
+        }
+        else { pat.active = true; pat.t = 0 }""",
+     """        pat.active = true; pat.t = 0"""),
+
+    # The pat hands and the worn pots both live in the stage layer, where the pot carries
+    # z-index 10+ — so the hand was drawn underneath the pot it is supposed to pat.
+    ("android-hand-above-pot",
+     """    hand.style.cssText = 'position:absolute;pointer-events:none;display:none;transform-origin:0 0'""",
+     """    hand.style.cssText = 'position:absolute;pointer-events:none;display:none;transform-origin:0 0;z-index:40'"""),
+
+
+    # Squash bookkeeping: the pot and its hair-erase mask live outside her body element, so
+    # the body transform never reaches them. Publish the frame's squash and replay the SAME
+    # transform (scale included — a translated pot that does not shrink slides down over her
+    # eyes as her head compresses) around the same pivot, which is her feet.
+    ("android-squash-publish",
+     """    body.style.transform = shakeTf""",
+     """    state.squash = { sx: 1, sy: 1, tx: sx, ty: sy, ox: state.left + state.size / 2, oy: state.top + state.size }
+    if (squash > 0.001) { state.squash.sx *= 1 + squash * 0.10; state.squash.sy *= 1 - squash * 0.16 }
+    if (pat.active) {
+      var pis = Math.floor(pat.t / 0.04) % 5
+      state.squash.sx *= 1 + pis * 0.025
+      state.squash.sy *= 1 - pis * 0.0625
+      state.squash.ty += Math.min(state.size * pis * 0.05 * pis * 0.0625,
+        Math.max(0, viewport().h - state.top - state.size))
+    }
+    body.style.transform = shakeTf"""),
+    ("android-squash-apply-to-pot",
+     """      r.el.style.transform = tf
+      r.el.style.zIndex = r.onHead ? String(10 + ironStackIndex(r)) : '0'""",
+     """      if (r.onHead && state.squash &&
+          (state.squash.sx !== 1 || state.squash.sy !== 1 || state.squash.tx || state.squash.ty)) {
+        var so = state.squash
+        tf = 'translate(' + so.ox.toFixed(1) + 'px,' + so.oy.toFixed(1) + 'px)' +
+          ' translate(' + so.tx.toFixed(1) + 'px,' + so.ty.toFixed(1) + 'px)' +
+          ' scale(' + so.sx.toFixed(4) + ',' + so.sy.toFixed(4) + ')' +
+          ' translate(' + (-so.ox).toFixed(1) + 'px,' + (-so.oy).toFixed(1) + 'px) ' + tf
+      }
+      r.el.style.transform = tf
+      r.el.style.zIndex = r.onHead ? String(10 + ironStackIndex(r)) : '0'"""),
+
+    # The pat hands were children of .dshvk1-root (z-index 9998) while the bowls live in
+    # .dshvk1-stage (10001) — so a worn pot always painted over the hand that pats it.
+    # Give the hands their own layer above the stage and shift them from root-local to
+    # page coordinates.
+    ("android-hand-layer-css",
+     """    '.dshvk1-radar{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible}',""",
+     """    '.dshvk1-radar{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible}',
+    '.dshvk1-hands{position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:10002}',"""),
+    ("android-hand-layer-create",
+     """  document.body.appendChild(stage)""",
+     """  document.body.appendChild(stage)
+  var handLayer = document.createElement('div')
+  handLayer.className = 'dshvk1-hands'
+  document.body.appendChild(handLayer)"""),
+    ("android-hand-layer-parent",
+     """    root.appendChild(hand)""",
+     """    handLayer.appendChild(hand)"""),
+    ("android-hand-layer-coords",
+     """    hands[frameIndex].style.left = x + 'px'
+    hands[frameIndex].style.top = y + 'px'""",
+     """    // The layer is fixed to the viewport, so root-local becomes page coordinates.
+    hands[frameIndex].style.left = (state.left + x) + 'px'
+    hands[frameIndex].style.top = (state.top + y) + 'px'"""),
+
 ]
 
 

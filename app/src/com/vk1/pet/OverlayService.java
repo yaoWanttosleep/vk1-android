@@ -59,9 +59,12 @@ public class OverlayService extends Service {
 
     private WindowManager wm;
     private WebView web;
-    private View touchSlot;
+    private static final int MAX_SLOTS = 6;
+    private final View[] slotView = new View[MAX_SLOTS];
+    private final WindowManager.LayoutParams[] slotLp = new WindowManager.LayoutParams[MAX_SLOTS];
+    private final int[] slotX = new int[MAX_SLOTS];
+    private final int[] slotY = new int[MAX_SLOTS];
     private WindowManager.LayoutParams webParams;
-    private WindowManager.LayoutParams touchParams;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Object lock = new Object();
 
@@ -74,7 +77,7 @@ public class OverlayService extends Service {
     private int screenW, screenH;
     private float density = 2.75f;
     private boolean expanded;
-    private int regionX, regionY, regionW = 1, regionH = 1;
+
     private final int[] webLoc = new int[2];
 
     private volatile String balanceJson = "{\"ok\":false}";
@@ -103,7 +106,7 @@ public class OverlayService extends Service {
             web.evaluateJavascript(js, null);
         }
     };
-    private int pendingX = -1, pendingY, pendingW, pendingH;
+    private int[][] pendingRects;
 
     private TextView debugView;
     private String debugText = "";
@@ -251,20 +254,7 @@ public class OverlayService extends Service {
         webParams.y = 0;
         wm.addView(web, webParams);
 
-        touchSlot = new View(this);
-        touchSlot.setBackgroundColor(Color.TRANSPARENT);
-        touchParams = new WindowManager.LayoutParams(
-                1, 1,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT);
-        touchParams.gravity = Gravity.TOP | Gravity.START;
-        touchParams.x = 0;
-        touchParams.y = 0;
-        touchSlot.setOnTouchListener(this::onSlotTouch);
-        wm.addView(touchSlot, touchParams);
+        ensureSlot(0);
 
         if (getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
                 .getBoolean(MainActivity.KEY_DEBUG, false)) {
@@ -275,7 +265,7 @@ public class OverlayService extends Service {
     }
 
     /** Forwards the gesture into the WebView, which sits at (0,0) covering the screen. */
-    private boolean onSlotTouch(View v, MotionEvent e) {
+    private boolean onSlotTouch(int idx, View v, MotionEvent e) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 downX = e.getRawX();
@@ -283,8 +273,8 @@ public class OverlayService extends Service {
                 moved = false;
                 gestureActive = true;
                 if (web != null) web.getLocationOnScreen(webLoc);
-                lpX = (regionX - webLoc[0] + e.getX()) / density;
-                lpY = (regionY - webLoc[1] + e.getY()) / density;
+                lpX = (slotX[idx] - webLoc[0] + e.getX()) / density;
+                lpY = (slotY[idx] - webLoc[1] + e.getY()) / density;
                 main.removeCallbacks(longPress);
                 main.postDelayed(longPress, 560);
                 break;
@@ -340,10 +330,10 @@ public class OverlayService extends Service {
                 }
                 // Resizing the slot mid-gesture makes the system cancel the touch, which
                 // used to abort every drag; the deferred region lands here instead.
-                if (pendingX >= 0) {
-                    int px = pendingX, py = pendingY, pw = pendingW, ph = pendingH;
-                    pendingX = -1;
-                    applyRegion(px, py, pw, ph);
+                if (pendingRects != null) {
+                    int[][] pr = pendingRects;
+                    pendingRects = null;
+                    applyRegions(pr);
                 }
                 break;
             default:
@@ -355,57 +345,106 @@ public class OverlayService extends Service {
         boolean skip = petDrag && e.getActionMasked() == MotionEvent.ACTION_MOVE;
         if (!skip) {
             MotionEvent copy = MotionEvent.obtain(e);
-            copy.offsetLocation(regionX - webLoc[0], regionY - webLoc[1]);
+            copy.offsetLocation(slotX[idx] - webLoc[0], slotY[idx] - webLoc[1]);
             if (web != null) web.dispatchTouchEvent(copy);
             copy.recycle();
         }
         return true;
     }
 
-    private void setTouchRegion(int x, int y, int w, int h) {
-        synchronized (lock) {
-            if (expanded || touchSlot == null) return;
-            if (gestureActive) {
-                pendingX = x;
-                pendingY = y;
-                pendingW = w;
-                pendingH = h;
-                return;
-            }
-            applyRegion(x, y, w, h);
+    private View ensureSlot(int i) {
+        if (slotView[i] != null) return slotView[i];
+        try {
+            View v = new View(this);
+            v.setBackgroundColor(Color.TRANSPARENT);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    1, 1,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                    PixelFormat.TRANSLUCENT);
+            lp.gravity = Gravity.TOP | Gravity.START;
+            lp.x = -200;
+            lp.y = -200;
+            final int idx = i;
+            v.setOnTouchListener((vv, ev) -> onSlotTouch(idx, vv, ev));
+            wm.addView(v, lp);
+            slotView[i] = v;
+            slotLp[i] = lp;
+            return v;
+        } catch (Throwable t) {
+            logFile("ensureSlot " + i + " failed: " + t);
+            return null;
         }
     }
 
-    private void applyRegion(int x, int y, int w, int h) {
+    /** rects arrive in page pixels: {x, y, w, h} per entry. */
+    private void setTouchRegions(int[][] rects) {
         synchronized (lock) {
-            if (touchSlot == null) return;
-            // x/y arrive in page pixels; the WebView itself may sit a status bar below
-            // the screen origin, which is exactly the offset that made every small hit
-            // target (the menu button, the bowls) need a tap "above" it.
-            if (web != null) web.getLocationOnScreen(webLoc);
-            x += webLoc[0];
-            y += webLoc[1];
-            x = clamp(x, 0, screenW - 1);
-            y = clamp(y, 0, screenH - 1);
-            w = clamp(w, 1, screenW - x);
-            h = clamp(h, 1, screenH - y);
-            if (x == regionX && y == regionY && w == regionW && h == regionH) return;
-            logToView("webLoc " + webLoc[0] + "," + webLoc[1]);
-            regionX = x;
-            regionY = y;
-            regionW = w;
-            regionH = h;
-            long nowLog = System.currentTimeMillis();
-            if (nowLog - lastRegionLog > 1200) {
-                lastRegionLog = nowLog;
-                logToView("region " + x + "," + y + " " + w + "x" + h);
+            if (expanded) return;
+            if (gestureActive) {
+                pendingRects = rects;
+                return;
             }
-            touchParams.x = x;
-            touchParams.y = y;
-            touchParams.width = w;
-            touchParams.height = h;
+            applyRegions(rects);
+        }
+    }
+
+    private void applyRegions(int[][] rects) {
+        synchronized (lock) {
+            if (web != null) web.getLocationOnScreen(webLoc);
+            int n = Math.min(rects.length, MAX_SLOTS);
+            for (int i = 0; i < n; i++) {
+                View v = ensureSlot(i);
+                if (v == null) continue;
+                int x = clamp(rects[i][0] + webLoc[0], 0, Math.max(0, screenW - 1));
+                int y = clamp(rects[i][1] + webLoc[1], 0, Math.max(0, screenH - 1));
+                int w = clamp(rects[i][2], 1, Math.max(1, screenW - x));
+                int h = clamp(rects[i][3], 1, Math.max(1, screenH - y));
+                slotX[i] = x;
+                slotY[i] = y;
+                WindowManager.LayoutParams lp = slotLp[i];
+                lp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+                if (lp.x == x && lp.y == y && lp.width == w && lp.height == h) continue;
+                lp.x = x;
+                lp.y = y;
+                lp.width = w;
+                lp.height = h;
+                try {
+                    wm.updateViewLayout(v, lp);
+                } catch (Exception ignored) {
+                }
+            }
+            for (int i = n; i < MAX_SLOTS; i++) hideSlot(i);
+        }
+    }
+
+    private void hideSlot(int i) {
+        View v = slotView[i];
+        if (v == null) return;
+        WindowManager.LayoutParams lp = slotLp[i];
+        lp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        lp.x = -200;
+        lp.y = -200;
+        lp.width = 1;
+        lp.height = 1;
+        try {
+            wm.updateViewLayout(v, lp);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void setSlotsTouchable(boolean touchable) {
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            View v = slotView[i];
+            if (v == null) continue;
+            WindowManager.LayoutParams lp = slotLp[i];
+            if (touchable) lp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            else lp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
             try {
-                wm.updateViewLayout(touchSlot, touchParams);
+                wm.updateViewLayout(v, lp);
             } catch (Exception ignored) {
             }
         }
@@ -473,7 +512,33 @@ public class OverlayService extends Service {
             }
         }
 
-        /** CSS-pixel rectangle that currently needs to swallow touches. */
+        /** CSS-pixel rectangles that currently need to swallow touches. */
+        @JavascriptInterface
+        public void touchRegions(String json) {
+            try {
+                org.json.JSONArray arr = new org.json.JSONArray(json);
+                final int[][] rects = new int[arr.length()][4];
+                for (int i = 0; i < arr.length(); i++) {
+                    org.json.JSONArray r = arr.getJSONArray(i);
+                    rects[i][0] = Math.round((float) r.getDouble(0) * density);
+                    rects[i][1] = Math.round((float) r.getDouble(1) * density);
+                    rects[i][2] = Math.max(8,
+                            Math.round((float) (r.getDouble(2) - r.getDouble(0)) * density));
+                    rects[i][3] = Math.max(8,
+                            Math.round((float) (r.getDouble(3) - r.getDouble(1)) * density));
+                }
+                main.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        setTouchRegions(rects);
+                    }
+                });
+            } catch (Throwable t) {
+                logFile("touchRegions failed: " + t);
+            }
+        }
+
+        /** Old single-rect entry point, kept so an older page cannot break the service. */
         @JavascriptInterface
         public void touchRegion(float x0, float y0, float x1, float y1) {
             try {
@@ -485,7 +550,7 @@ public class OverlayService extends Service {
                 main.post(new Runnable() {
                     @Override
                     public void run() {
-                        setTouchRegion(px, py, pw, ph);
+                        setTouchRegions(new int[][]{{px, py, pw, ph}});
                     }
                 });
             } catch (Throwable t) {
@@ -516,19 +581,11 @@ public class OverlayService extends Service {
                                     webParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
                                     webParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
                                     webParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
-                                    touchParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                                    try {
-                                        wm.updateViewLayout(touchSlot, touchParams);
-                                    } catch (Exception ignored) {
-                                    }
+                                    setSlotsTouchable(false);
                                 } else {
                                     webParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
                                     webParams.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-                                    touchParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                                    try {
-                                        wm.updateViewLayout(touchSlot, touchParams);
-                                    } catch (Exception ignored) {
-                                    }
+                                    setSlotsTouchable(true);
                                 }
                                 applyWebParams();
                                 if (!on) {
@@ -752,12 +809,14 @@ public class OverlayService extends Service {
             }
             debugView = null;
         }
-        if (touchSlot != null) {
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            if (slotView[i] == null) continue;
             try {
-                wm.removeView(touchSlot);
+                wm.removeView(slotView[i]);
             } catch (Exception ignored) {
             }
-            touchSlot = null;
+            slotView[i] = null;
+            slotLp[i] = null;
         }
         if (web != null) {
             try {

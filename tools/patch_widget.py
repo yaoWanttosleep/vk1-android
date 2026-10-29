@@ -550,6 +550,44 @@ PATCHES = [
     return state.left + state.size / 2 > (viewport().w || 0) / 2
   }"""),
 
+    # One rectangle per thing that actually wants touches: her square, and each prop on its
+    # own. The old single union rect meant a bowl parked across the screen turned the whole
+    # bottom strip into a dead zone for every app underneath.
+    ("android-multi-region",
+     """    var x0 = state.left, y0 = state.top
+    var x1 = state.left + state.size, y1 = state.top + state.size
+    for (var i = 0; i < state.bowls.length; i++) {
+      var b = state.bowls[i]
+      if (!b.el || b.fed) continue
+      if (b.X - b.artW / 2 < x0) x0 = b.X - b.artW / 2
+      if (b.Y - b.artH / 2 < y0) y0 = b.Y - b.artH / 2
+      if (b.X + b.artW / 2 > x1) x1 = b.X + b.artW / 2
+      if (b.Y + b.artH / 2 > y1) y1 = b.Y + b.artH / 2
+    }
+    x0 -= 8; y0 -= 8; x1 += 8; y1 += 8
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0)
+    x1 = Math.min(innerWidth, x1); y1 = Math.min(innerHeight, y1)
+    var r = vk1Region
+    if (Math.abs(x0 - r.x0) + Math.abs(y0 - r.y0) + Math.abs(x1 - r.x1) + Math.abs(y1 - r.y1) < 3 &&
+        now - r.t < 500) return
+    r.x0 = x0; r.y0 = y0; r.x1 = x1; r.y1 = y1; r.t = now
+    ANDROID.touchRegion(x0, y0, x1, y1)""",
+     """    var rects = [[state.left, state.top, state.left + state.size, state.top + state.size]]
+    for (var i = 0; i < state.bowls.length && rects.length < 6; i++) {
+      var b = state.bowls[i]
+      if (!b.el || b.fed) continue
+      rects.push([b.X - b.artW / 2, b.Y - b.artH / 2, b.X + b.artW / 2, b.Y + b.artH / 2])
+    }
+    var key = ''
+    for (var k = 0; k < rects.length; k++) {
+      key += Math.round(rects[k][0]) + ',' + Math.round(rects[k][1]) + ',' +
+        Math.round(rects[k][2]) + ',' + Math.round(rects[k][3]) + ';'
+    }
+    var r = vk1Region
+    if (key === r.key && now - r.t < 500) return
+    r.key = key; r.t = now
+    ANDROID.touchRegions(JSON.stringify(rects))"""),
+
 ]
 
 

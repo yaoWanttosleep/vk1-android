@@ -299,13 +299,45 @@ public class MainActivity extends Activity {
         });
         root.addView(radar);
 
+        // Hidden "advanced" block: long-press the title to reveal. Keeps the debug switch
+        // and the log export out of the normal settings list without deleting them.
+        LinearLayout advanced = new LinearLayout(this);
+        advanced.setOrientation(LinearLayout.VERTICAL);
+        advanced.setVisibility(android.view.View.GONE);
+        root.addView(advanced);
+
         android.widget.CheckBox debug = new android.widget.CheckBox(this);
         debug.setText("显示调试信息（排查问题用，平时关着）");
         debug.setTextSize(13);
         debug.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DEBUG, false));
         debug.setOnCheckedChangeListener((v, checked) ->
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_DEBUG, checked).apply());
-        root.addView(debug);
+        advanced.addView(debug);
+
+        final TextView advHint = new TextView(this);
+        advHint.setText("日志：Android/data/com.vk1.pet/files/vk1.log（400KB 自动轮转）");
+        advHint.setTextSize(11);
+        advHint.setTextColor(0xFF888888);
+        advanced.addView(advHint);
+
+        LinearLayout advRow = row();
+        advRow.addView(button("导出日志", v -> exportLog()));
+        advRow.addView(button("清空调试", v -> {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_DEBUG, false).apply();
+            debug.setChecked(false);
+        }));
+        advanced.addView(advRow);
+
+        final long[] holdAt = {0};
+        title.setOnLongClickListener(v -> {
+            long now = System.currentTimeMillis();
+            if (now - holdAt[0] < 1200) return true;
+            holdAt[0] = now;
+            boolean show = advanced.getVisibility() != android.view.View.VISIBLE;
+            advanced.setVisibility(show ? android.view.View.VISIBLE : android.view.View.GONE);
+            toastStatus(show ? "高级选项已展开（长按标题可收起）" : "高级选项已收起");
+            return true;
+        });
 
         status = new TextView(this);
         status.setTextSize(13);
